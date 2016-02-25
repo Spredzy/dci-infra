@@ -1,0 +1,131 @@
+# -*- encoding: utf-8 -*-
+#
+# Copyright 2015 Red Hat, Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+---
+- name: Install sensu-plugins
+  command: sensu-install -p {{item}}
+  with_items:
+    - http
+  tags:
+    - monitoring
+
+# Ensure the needed SELinux booleans are enabled
+- name: Ensure the needed SELinux booleans are enabled
+  seboolean: name={{item}} state=yes persistent=yes
+  with_items:
+    - httpd_can_network_connect
+    - httpd_can_network_connect_db
+  tags:
+    - dci-core
+
+# Ensure dci-release is installed
+- name: Ensure dci-release is installed (CentOS, RedHat)
+  yum: name=http://dci.enovance.com/dci-release.el7.noarch.rpm state=present
+  when: ansible_distribution in ['CentOS', 'RedHat']
+  tags:
+    - dci-core
+
+- name: Ensure dci-release is installed (Fedora)
+  yum: name=http://dci.enovance.com/dci-release.fc23.noarch.rpm state=present
+  when: ansible_distribution in ['Fedora']
+  tags:
+    - dci-core
+
+# Ensure postgresql client tools are installed
+- name: Ensure postgresql client toos installed
+  yum: name=postgresql state=present
+  tags:
+    - dci-core
+
+# Ensure a backup of the database is made before
+# any update takes place
+- name: Ensure backup is made
+  shell: pg_dump -U {{ dbuser }} -h {{ dbhost }} -w {{ dbname }} > {{ dbbackuppath }}/$(rpm -q --queryformat '%{VERSION}' dci-api | sed 's/[0-9].[0-9].\(.*\)/\1/g').sql
+  environment:
+    PGPASSWORD: '{{ dbpassword }}'
+  tags:
+    - dci-core
+
+# Install DCI-API
+#
+- name: Ensure DCI is installed
+  yum: name={{item}} state=latest update_cache=yes
+  with_items:
+    - dci-common
+    - dci-api
+  tags:
+    - dci-core
+
+# Configure DCI-API configuration file
+#
+- name: Ensure HOST is configurerd in settingss.py
+  lineinfile: dest=/etc/dci-api/settings.py regexp='^HOST =' line="HOST = '{{ apihost }}'"
+  notify:
+    - reload httpd
+  tags:
+    - dci-core
+
+- name: Ensure ES_HOST is configurerd in settingss.py
+  lineinfile: dest=/etc/dci-api/settings.py regexp='^ES_HOST =' line="ES_HOST = '{{ eshost }}'"
+  notify:
+    - reload httpd
+  tags:
+    - dci-core
+
+- name: Ensure SQLALCHEMY_DATABASE_URI is configurerd in settingss.py
+  lineinfile: dest=/etc/dci-api/settings.py regexp='^SQLALCHEMY_DATABASE_URI =' line="SQLALCHEMY_DATABASE_URI = 'postgresql://{{ dbuser }}:{{ dbpassword }}@{{ dbhost }}:5432/{{ dbname }}'"
+  notify:
+    - reload httpd
+  tags:
+    - dci-core
+
+# Install DCI itself
+#
+- name: Check if db is already in place
+  shell: psql -U {{ dbuser }} -h {{ dbhost }} -d {{ dbname }} -w -c 'SELECT * FROM users'
+  environment:
+    PGPASSWORD: '{{ dbpassword }}'
+  register: dbexist
+  ignore_errors: yes
+  tags:
+    - dci-core
+
+- name: Initiate db schema
+  command: dci-dbinit
+  environment:
+    DCI_LOGIN: admin
+    DCI_PASSWORD: '{{ adminpassword }}'
+  when: dbexist|failed
+  tags:
+    - dci-core
+
+- name: Update the schema
+  command: dci-dbsync
+  environment:
+    DCI_LOGIN: admin
+    DCI_PASSWORD: '{{ adminpassword }}'
+  when: dbexist|success
+  tags:
+    - dci-core
+
+# Configure DCI-API vhost
+#
+- name: Create vhost file
+  template: src=dci_api.conf dest=/etc/httpd/conf.d/dci_api.conf
+  notify:
+    - reload httpd
+  tags:
+    - dci-core

@@ -1,0 +1,12 @@
+{
+  "checks": {
+    "ntp": {
+      "command": "check-ntp.rb",
+      "interval": 10,
+      "handlers": ["file"],
+      "subscribers": [
+        "base"
+      ]
+    }
+  }
+}

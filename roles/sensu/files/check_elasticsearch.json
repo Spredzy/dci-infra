@@ -1,0 +1,13 @@
+{
+  "checks": {
+    "elasticsearch-node-status": {
+      "command": "check-es-node-status.rb",
+      "interval": 10,
+      "handlers": ["file"],
+      "subscribers": [
+        "elasticsearch"
+      ]
+    }
+  }
+}
+

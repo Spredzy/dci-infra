@@ -1,0 +1,12 @@
+{
+  "checks": {
+    "dns": {
+      "command": "check-dns.rb -d www.google.fr",
+      "interval": 10,
+      "handlers": ["file"],
+      "subscribers": [
+        "base"
+      ]
+    }
+  }
+}
